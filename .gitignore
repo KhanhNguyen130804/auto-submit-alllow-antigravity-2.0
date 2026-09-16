@@ -1,0 +1,29 @@
+# Runtime & Process ID
+auto_submit.pid
+*.pid
+*.log
+
+# Dependencies
+node_modules/
+
+# Python cache & virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Template & visual screenshots
+submit_template.png
+
+# Environment variables & Local secrets
+.env
+.env.*
+*.local
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
