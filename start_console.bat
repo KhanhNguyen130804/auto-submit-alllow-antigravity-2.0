@@ -4,8 +4,8 @@ title Antigravity Auto-Submit (Console)
 cd /d "%~dp0"
 
 echo ========================================================
-echo   🚀 KHỞI ĐỘNG ANTIGRAVITY AUTO-SUBMIT (CONSOLE MODE)
-echo   Chương trình tự động phê duyệt và nhấn Submit trong Antigravity
+echo   🚀 KHỞI ĐỘNG ANTIGRAVITY AUTO-SUBMIT (DUAL-ENGINE)
+echo   Tự động phê duyệt lệnh cho Antigravity 2.0 + IDE 2.0
 echo ========================================================
 echo.
 

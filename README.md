@@ -26,6 +26,32 @@ Hỗ trợ song song cả hai nền tảng:
 
 ---
 
+## 🏛️ Sơ Đồ Kiến Trúc Hoạt Động (Dual-Engine)
+
+```mermaid
+flowchart TD
+    subgraph Apps["Ứng Dụng Antigravity"]
+        Desktop["Antigravity Desktop 2.0\n(Tự mở cổng CDP)"]
+        IDE["Antigravity IDE 2.0\n(Cổng 9223 qua setup_ide.bat)"]
+    end
+
+    subgraph Daemon["Antigravity Auto-Submit Daemon"]
+        Scanner["Bộ Quét Đa Mục Tiêu\n(Dual Target Scanner)"]
+        Injector["Bộ Tiêm Script & Xuyên Webview\n(Iframe Piercing Engine)"]
+        Observer["Giám Sát DOM & Tự Động Click\n(< 20ms Phản Hồi)"]
+    end
+
+    Desktop -->|DevToolsActivePort| Scanner
+    IDE -->|Port 9223 / DevToolsActivePort| Scanner
+    Scanner --> Injector
+    Injector -->|DOM Phẳng| Desktop
+    Injector -->|Xuyên Iframe / Webview| IDE
+    Observer -->|Tự Động Nhấn Submit / Allow| Desktop
+    Observer -->|Tự Động Nhấn Submit / Allow| IDE
+```
+
+---
+
 ## 📂 Danh Sách Tệp Trong Thư Mục
 
 | Tệp | Mô tả |

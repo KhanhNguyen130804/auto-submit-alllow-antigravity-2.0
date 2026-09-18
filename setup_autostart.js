@@ -14,7 +14,7 @@ $s = $ws.CreateShortcut('${shortcutPath.replace(/\\/g, '\\\\')}')
 $s.TargetPath = 'wscript.exe'
 $s.Arguments = '"${targetScript.replace(/\\/g, '\\\\')}"'
 $s.WorkingDirectory = '${__dirname.replace(/\\/g, '\\\\')}'
-$s.Description = 'Antigravity Auto-Submit Daemon'
+$s.Description = 'Antigravity Auto-Submit Daemon (Dual-Engine)'
 $s.Save()
 `;
 
