@@ -1,8 +1,12 @@
 /**
- * Antigravity Auto-Submit Daemon
- * Tự động phê duyệt và nhấn nút Submit mỗi khi Antigravity yêu cầu cho phép chạy lệnh.
+ * Antigravity Auto-Submit Daemon (Dual-Engine)
+ * Tự động phê duyệt và nhấn nút Submit / Allow mỗi khi Agent yêu cầu chạy lệnh terminal.
  * 
- * Hoạt động ngầm thông qua Chrome DevTools Protocol (CDP) trên Antigravity.
+ * Hỗ trợ song song cả 2 nền tảng:
+ * 1. Antigravity 2.0 (Standalone Desktop Electron App)
+ * 2. Antigravity IDE 2.0 (AI-first IDE trên nền VS Code)
+ * 
+ * Hoạt động ngầm thông qua Chrome DevTools Protocol (CDP).
  * Không chiếm quyền chuột, không ảnh hưởng thao tác phím, phản hồi tức thì (< 20ms).
  */
 
@@ -10,20 +14,37 @@ const fs = require('fs');
 const path = require('path');
 
 const APPDATA = process.env.APPDATA || path.join(process.env.USERPROFILE, 'AppData', 'Roaming');
-const DEVTOOLS_PATH = path.join(APPDATA, 'Antigravity', 'DevToolsActivePort');
+
+// Cấu hình các ứng dụng Antigravity được giám sát
+const TARGET_CONFIGS = [
+  {
+    id: 'desktop',
+    name: 'Antigravity Desktop 2.0',
+    portFile: path.join(APPDATA, 'Antigravity', 'DevToolsActivePort'),
+    fallbackPort: null
+  },
+  {
+    id: 'ide',
+    name: 'Antigravity IDE 2.0',
+    portFile: path.join(APPDATA, 'Antigravity IDE', 'DevToolsActivePort'),
+    fallbackPort: 9223 // Cổng được cấu hình qua setup_ide.bat (argv.json)
+  }
+];
 
 const CHECK_INTERVAL_MS = 3000;
 const SUBMIT_COOLDOWN_MS = 1500;
 
-let activeSockets = new Map(); // targetId -> WebSocket
+// Lưu trữ các kết nối WebSocket: socketKey -> { ws, targetConfig, pageTitle, port }
+let activeSockets = new Map();
 let isRunning = true;
+let lastWaitingLogTime = 0;
 
 function log(msg) {
   const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
   console.log(`[${time}] ${msg}`);
 }
 
-// Đoạn script được tiêm trực tiếp vào giao diện DOM của Antigravity
+// Đoạn script được tiêm trực tiếp vào giao diện DOM (hỗ trợ cả Iframe và Webview)
 const INJECTED_SCRIPT = `
 (() => {
   if (window.__autoSubmitAntigravityInstalled) return 'already_installed';
@@ -32,52 +53,85 @@ const INJECTED_SCRIPT = `
   let lastSubmitTime = 0;
   const COOLDOWN = ${SUBMIT_COOLDOWN_MS};
 
+  // Thu thập tất cả document có thể truy cập (bao gồm cả iframe/webview con của VS Code)
+  function getAllDocuments(root = document) {
+    const docs = [root];
+    try {
+      const iframes = root.querySelectorAll('iframe, frame');
+      for (const frame of iframes) {
+        try {
+          const doc = frame.contentDocument || frame.contentWindow?.document;
+          if (doc && !docs.includes(doc)) {
+            docs.push(...getAllDocuments(doc));
+          }
+        } catch (e) {
+          // Iframe cross-origin được CDP xử lý riêng qua Target.setAutoAttach
+        }
+      }
+    } catch (e) {}
+    return docs;
+  }
+
   function triggerSubmit() {
     const now = Date.now();
     if (now - lastSubmitTime < COOLDOWN) return false;
 
-    // Tìm tất cả các nút trên giao diện
-    const buttons = Array.from(document.querySelectorAll('button'));
-    
-    // Tìm nút có nhãn Submit
-    const submitBtn = buttons.find(b => {
-      const text = (b.innerText || b.textContent || '').trim();
-      return text === 'Submit' || text.startsWith('Submit');
-    });
+    const docs = getAllDocuments();
+    for (const doc of docs) {
+      if (!doc || !doc.querySelectorAll) continue;
 
-    if (!submitBtn) return false;
+      const buttons = Array.from(doc.querySelectorAll('button'));
+      if (!buttons.length) continue;
 
-    // Kiểm tra xem hộp thoại xác nhận có đang hiển thị không:
-    // Hộp thoại này có chứa các cụm từ đặc trưng như:
-    // - "allow this time"
-    // - "tell the agent what to do instead"
-    // - Có nút "Skip" bên cạnh nút "Submit"
-    const hasSkipButton = buttons.some(b => (b.innerText || b.textContent || '').trim() === 'Skip');
-    const bodyText = document.body ? document.body.innerText : '';
-    const isApprovalDialog = hasSkipButton || 
-                             bodyText.includes('allow this time') || 
-                             bodyText.includes('Allow checking') ||
-                             bodyText.includes('tell the agent what to do instead');
+      // Tìm nút phê duyệt: Submit, Allow, Always Allow, Proceed, Run
+      const submitBtn = buttons.find(b => {
+        const text = (b.innerText || b.textContent || '').trim();
+        return text === 'Submit' || 
+               text.startsWith('Submit') ||
+               text === 'Allow' ||
+               text === 'Allow Once' ||
+               text === 'Always Allow' ||
+               text === 'Proceed';
+      });
 
-    if (isApprovalDialog) {
-      lastSubmitTime = now;
-      console.log('[AUTO_SUBMIT_TRIGGERED] Phát hiện hộp thoại yêu cầu chạy lệnh! Đang nhấn Submit...');
-      
-      // Kích hoạt sự kiện click
-      submitBtn.click();
-      return true;
+      if (!submitBtn) continue;
+
+      // Xác minh dấu hiệu của hộp thoại phê duyệt chạy lệnh
+      const hasSkipButton = buttons.some(b => {
+        const text = (b.innerText || b.textContent || '').trim();
+        return text === 'Skip' || text === 'Deny' || text === 'Cancel';
+      });
+
+      const bodyText = (doc.body ? doc.body.innerText : '') || '';
+      const isApprovalDialog = hasSkipButton || 
+                               bodyText.includes('allow this time') || 
+                               bodyText.includes('Allow checking') ||
+                               bodyText.includes('tell the agent what to do instead') ||
+                               bodyText.includes('Do you want to run') ||
+                               bodyText.includes('requires your approval') ||
+                               bodyText.includes('Allow checking environment tools') ||
+                               bodyText.includes('permission to run');
+
+      if (isApprovalDialog) {
+        lastSubmitTime = now;
+        const btnText = (submitBtn.innerText || submitBtn.textContent || '').trim();
+        console.log('[AUTO_SUBMIT_TRIGGERED] Phát hiện hộp thoại yêu cầu chạy lệnh! Đang nhấn nút: "' + btnText + '"');
+        
+        submitBtn.click();
+        return true;
+      }
     }
     return false;
   }
 
-  // Quét định kỳ cực nhanh mỗi 100ms
+  // Quét định kỳ mỗi 100ms
   setInterval(triggerSubmit, 100);
 
-  // Quan sát DOM Mutation để phản hồi ngay lập tức khi hộp thoại render
+  // Quan sát DOM Mutation để phản hồi ngay khi hộp thoại vừa render
   const observer = new MutationObserver(() => {
     triggerSubmit();
   });
-  
+
   if (document.body) {
     observer.observe(document.body, { childList: true, subtree: true });
   }
@@ -87,45 +141,77 @@ const INJECTED_SCRIPT = `
 })()
 `;
 
-async function getDevToolsPort() {
-  if (!fs.existsSync(DEVTOOLS_PATH)) {
-    return null;
+// Lấy cổng DevTools cho từng ứng dụng
+async function getTargetPort(target) {
+  // 1. Kiểm tra qua tệp DevToolsActivePort
+  if (fs.existsSync(target.portFile)) {
+    try {
+      const content = fs.readFileSync(target.portFile, 'utf8');
+      const firstLine = content.split('\n')[0].trim();
+      const port = parseInt(firstLine, 10);
+      if (!isNaN(port) && port > 0) {
+        return port;
+      }
+    } catch (e) {}
   }
-  try {
-    const content = fs.readFileSync(DEVTOOLS_PATH, 'utf8');
-    const firstLine = content.split('\n')[0].trim();
-    const port = parseInt(firstLine, 10);
-    return isNaN(port) ? null : port;
-  } catch (e) {
-    return null;
+
+  // 2. Nếu có fallbackPort, thăm dò HTTP xem cổng có online không
+  if (target.fallbackPort) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 600);
+      const res = await fetch(`http://127.0.0.1:${target.fallbackPort}/json/version`, {
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        return target.fallbackPort;
+      }
+    } catch (e) {}
   }
+
+  return null;
 }
 
-async function connectToPage(page, port) {
-  if (activeSockets.has(page.id)) return;
+// Kết nối tới một trang / webview cụ thể
+async function connectToPage(target, page, port) {
+  const socketKey = `${target.id}::${page.id}`;
+  if (activeSockets.has(socketKey)) return;
 
-  log(`Đang kết nối tới cửa sổ Antigravity: "${page.title || 'Untitled'}"...`);
+  const title = page.title || 'Untitled';
+  log(`[${target.name}] Đang kết nối tới cửa sổ: "${title}"...`);
 
   let ws;
   try {
     ws = new WebSocket(page.webSocketDebuggerUrl);
   } catch (err) {
-    log(`Lỗi tạo kết nối WebSocket: ${err.message}`);
+    log(`[${target.name}] Lỗi tạo kết nối WebSocket: ${err.message}`);
     return;
   }
 
-  activeSockets.set(page.id, ws);
+  activeSockets.set(socketKey, { ws, target, title, port });
 
   ws.onopen = () => {
-    log(`✅ Đã kết nối thành công tới Antigravity (Port ${port}). Đang cài đặt bộ theo dõi tự động...`);
+    log(`✅ [${target.name}] Kết nối thành công (Port ${port}). Đang cài đặt bộ theo dõi tự động...`);
 
-    // Bật Domain Runtime và Page
+    // Kích hoạt Runtime, Page và tự động đính kèm webview con
     ws.send(JSON.stringify({ id: 1, method: 'Runtime.enable' }));
     ws.send(JSON.stringify({ id: 2, method: 'Page.enable' }));
-
-    // Đăng ký script tự động tiêm vào MỌI tài liệu mới, trang mới hoặc khi chuyển chat
+    
+    // Tự động đính kèm vào các Webview / iframe con (quan trọng cho Antigravity IDE)
     ws.send(JSON.stringify({
       id: 3,
+      method: 'Target.setAutoAttach',
+      params: {
+        autoAttach: true,
+        waitForDebuggerOnStart: false,
+        flatten: true
+      }
+    }));
+
+    // Đăng ký tiêm script vào mọi tài liệu mới
+    ws.send(JSON.stringify({
+      id: 4,
       method: 'Page.addScriptToEvaluateOnNewDocument',
       params: {
         source: INJECTED_SCRIPT
@@ -134,7 +220,7 @@ async function connectToPage(page, port) {
 
     // Tiêm ngay vào trang hiện tại
     ws.send(JSON.stringify({
-      id: 4,
+      id: 5,
       method: 'Runtime.evaluate',
       params: {
         expression: INJECTED_SCRIPT,
@@ -151,51 +237,74 @@ async function connectToPage(page, port) {
       if (data.method === 'Runtime.consoleAPICalled') {
         const args = data.params.args || [];
         const text = args.map(a => a.value || '').join(' ');
-        
+
         if (text.includes('[AUTO_SUBMIT_TRIGGERED]')) {
-          log(`⚡ TỰ ĐỘNG PHÊ DUYỆT THÀNH CÔNG: Đã nhấn nút Submit cho lệnh của Antigravity!`);
+          log(`⚡ [${target.name}] TỰ ĐỘNG PHÊ DUYỆT THÀNH CÔNG: Đã nhấn nút phê duyệt lệnh!`);
         } else if (text.includes('[AUTO_SUBMIT_READY]')) {
-          log(`🟢 Trình theo dõi tự động đã kích hoạt trên giao diện.`);
+          log(`🟢 [${target.name}] Trình theo dõi tự động đã kích hoạt trên giao diện.`);
+        }
+      } else if (data.method === 'Target.attachedToTarget') {
+        // Một webview con vừa được mở ra, tiêm script vào session con này
+        const sessionId = data.params?.sessionId;
+        if (sessionId) {
+          ws.send(JSON.stringify({
+            id: 100,
+            sessionId,
+            method: 'Runtime.evaluate',
+            params: {
+              expression: INJECTED_SCRIPT,
+              returnByValue: true
+            }
+          }));
         }
       }
-    } catch (e) {
-      // Bỏ qua lỗi parse
-    }
+    } catch (e) {}
   };
 
   ws.onclose = () => {
-    activeSockets.delete(page.id);
-    log(`Mất kết nối tới cửa sổ "${page.title}". Sẽ tự động kết nối lại khi có thể.`);
+    activeSockets.delete(socketKey);
+    log(`[${target.name}] Đã đóng kết nối tới cửa sổ "${title}". Sẽ tự động kết nối lại khi có thể.`);
   };
 
-  ws.onerror = (err) => {
-    activeSockets.delete(page.id);
+  ws.onerror = () => {
+    activeSockets.delete(socketKey);
   };
 }
 
+// Vòng lặp giám sát đa mục tiêu
 async function loop() {
   while (isRunning) {
-    const port = await getDevToolsPort();
-    if (!port) {
-      if (activeSockets.size === 0) {
-        log(`Đang chờ Antigravity khởi động... (chưa thấy tệp DevToolsActivePort)`);
-      }
-    } else {
+    let anyOnline = false;
+
+    for (const target of TARGET_CONFIGS) {
+      const port = await getTargetPort(target);
+      if (!port) continue;
+
+      anyOnline = true;
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/json`);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 1200);
+        const res = await fetch(`http://127.0.0.1:${port}/json`, {
+          signal: controller.signal
+        });
+        clearTimeout(timer);
+
         const targets = await res.json();
-        
-        // Lấy tất cả các targets thuộc loại 'page'
-        const pages = targets.filter(t => t.type === 'page' && t.webSocketDebuggerUrl);
+        // Lấy tất cả các target hợp lệ (cửa sổ chính, webview, iframe)
+        const pages = targets.filter(t => 
+          (t.type === 'page' || t.type === 'webview' || t.type === 'iframe') && 
+          t.webSocketDebuggerUrl
+        );
 
         for (const page of pages) {
-          if (!activeSockets.has(page.id)) {
-            await connectToPage(page, port);
+          const socketKey = `${target.id}::${page.id}`;
+          if (!activeSockets.has(socketKey)) {
+            await connectToPage(target, page, port);
           } else {
-            // Đảm bảo script theo dõi luôn hiện diện khi chuyển đổi giữa các đoạn chat (SPA / Navigation)
-            const ws = activeSockets.get(page.id);
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({
+            // Duy trì tiêm lại script khi người dùng chuyển hội thoại (SPA navigation)
+            const socketInfo = activeSockets.get(socketKey);
+            if (socketInfo && socketInfo.ws && socketInfo.ws.readyState === WebSocket.OPEN) {
+              socketInfo.ws.send(JSON.stringify({
                 id: 99,
                 method: 'Runtime.evaluate',
                 params: {
@@ -206,9 +315,14 @@ async function loop() {
             }
           }
         }
-      } catch (err) {
-        // Port có thể chưa sẵn sàng hoặc Antigravity đang khởi động lại
-      }
+      } catch (err) {}
+    }
+
+    // Nếu chưa có ứng dụng nào mở, thông báo nhẹ định kỳ mỗi 15 giây
+    const now = Date.now();
+    if (!anyOnline && activeSockets.size === 0 && (now - lastWaitingLogTime > 15000)) {
+      lastWaitingLogTime = now;
+      log(`Đang chờ Antigravity (App hoặc IDE) khởi động...`);
     }
 
     await new Promise(r => setTimeout(r, CHECK_INTERVAL_MS));
@@ -223,40 +337,38 @@ function cleanPid() {
   } catch (e) {}
 }
 
-// Ghi PID hiện tại
+// Ghi PID tiến trình hiện tại
 try {
   fs.writeFileSync(PID_PATH, process.pid.toString(), 'utf8');
 } catch (e) {}
 
-// Xử lý dừng tiến trình nhẹ nhàng
-process.on('SIGINT', () => {
-  log(`Đang dừng chương trình...`);
+// Dọn dẹp an toàn khi dừng tiến trình
+function stopProcess() {
   isRunning = false;
   cleanPid();
-  for (const ws of activeSockets.values()) {
-    try { ws.close(); } catch (e) {}
+  for (const info of activeSockets.values()) {
+    try { info.ws.close(); } catch (e) {}
   }
   process.exit(0);
+}
+
+process.on('SIGINT', () => {
+  log(`Đang dừng chương trình...`);
+  stopProcess();
 });
 
 process.on('SIGTERM', () => {
-  isRunning = false;
-  cleanPid();
-  for (const ws of activeSockets.values()) {
-    try { ws.close(); } catch (e) {}
-  }
-  process.exit(0);
+  stopProcess();
 });
 
 process.on('exit', () => {
   cleanPid();
 });
 
-console.log('====================================================');
-console.log('🚀 ANTIGRAVITY AUTO-SUBMIT SERVICE');
+console.log('========================================================');
+console.log('🚀 ANTIGRAVITY AUTO-SUBMIT SERVICE (DUAL-ENGINE)');
 console.log(`Tiến trình PID: ${process.pid}`);
-console.log('Chương trình tự động nhấn nút Submit phê duyệt lệnh');
-console.log('====================================================');
+console.log('Hỗ trợ: Antigravity 2.0 (Desktop) + Antigravity IDE 2.0');
+console.log('========================================================');
 
 loop();
-
