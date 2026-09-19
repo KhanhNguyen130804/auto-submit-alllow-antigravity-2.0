@@ -2,6 +2,7 @@
 auto_submit.pid
 *.pid
 *.log
+security-audit.log*
 
 # Dependencies
 node_modules/

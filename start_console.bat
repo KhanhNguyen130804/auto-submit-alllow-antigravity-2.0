@@ -20,7 +20,7 @@ if %ERRORLEVEL% neq 0 (
 
 echo Đang chạy dịch vụ giám sát... (Nhấn Ctrl+C để dừng)
 echo.
-node auto_submit.js
+node "%~dp0auto_submit.js"
 
 echo.
 echo Dịch vụ đã dừng.

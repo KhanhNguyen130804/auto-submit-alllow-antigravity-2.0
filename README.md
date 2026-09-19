@@ -1,118 +1,118 @@
-# 🚀 Antigravity Auto-Submit Daemon (Dual-Engine)
+# 🛡️ Antigravity Auto-Submit Daemon (Safety-First Dual-Engine)
 
-Chương trình tự động hóa việc nhấn nút **`Submit` / `Allow`** để phê duyệt lệnh terminal mỗi khi AI Agent yêu cầu chạy lệnh an toàn (`Allow checking environment tools?...`), giúp Agent làm việc liên tục mà không cần người dùng phải bấm thủ công.
+Daemon Windows tự động phê duyệt **một tập lệnh đọc có rủi ro thấp** trong:
 
-Hỗ trợ song song cả hai nền tảng:
-- 📱 **Antigravity 2.0** (Ứng dụng máy tính độc lập - Electron Desktop App)
-- 💻 **Antigravity IDE 2.0** (Môi trường lập trình AI-first trên nền VS Code)
+- Antigravity Desktop 2.0
+- Antigravity IDE 2.0
 
----
+Daemon điều khiển DOM qua Chrome DevTools Protocol (CDP), không chiếm chuột. Khác với phiên bản cũ, chương trình không còn nhấn `Submit`/`Allow` chỉ vì nhận ra hộp thoại phê duyệt.
 
-## 🌟 Tính Năng Nổi Bật
+## Cơ chế an toàn
 
-1. **Hỗ trợ song song 2 ứng dụng (Dual-Engine)**:
-   - Tự động nhận diện và kết nối đồng thời cả Antigravity Desktop và Antigravity IDE. Bạn có thể mở một trong hai hoặc mở cả hai cùng lúc, tool sẽ tự động bám theo và phê duyệt đúng cửa sổ yêu cầu.
-2. **Hoàn toàn không chiếm chuột**: 
-   - Chương trình kích hoạt sự kiện `.click()` trực tiếp ở tầng DOM thông qua Chrome DevTools Protocol (CDP).
-   - Con trỏ chuột của bạn hoàn toàn tự do, không bị giật, bạn có thể gõ phím hoặc làm việc khác mà không bị ảnh hưởng.
-3. **Xuyên Webview / Iframe (Iframe Piercing)**:
-   - Đối với Antigravity IDE, các panel chat (Cascade/Jetski) thường nằm trong webview lồng nhau. Bộ tiêm script được nâng cấp để duyệt đệ quy qua tất cả các iframe và shadow DOM.
-4. **Hoạt động ngầm (Background)**:
-   - Tự động click ngay cả khi cửa sổ Antigravity hoặc Antigravity IDE bị che khuất hoặc thu nhỏ xuống Taskbar.
-5. **Tốc độ phản ứng tức thì**:
-   - Sử dụng `MutationObserver` kết hợp chu kỳ quét 100ms, tự động nhấn Submit trong vòng **dưới 20ms** kể từ khi bảng hiện lên.
-6. **Không cần cài đặt thêm thư viện**:
-   - Sử dụng 100% native API có sẵn của Node.js (`fetch`, `WebSocket`, `fs`), không cần chạy `npm install`.
-
----
-
-## 🏛️ Sơ Đồ Kiến Trúc Hoạt Động (Dual-Engine)
-
-```mermaid
-flowchart TD
-    subgraph Apps["Ứng Dụng Antigravity"]
-        Desktop["Antigravity Desktop 2.0\n(Tự mở cổng CDP)"]
-        IDE["Antigravity IDE 2.0\n(Cổng 9223 qua setup_ide.bat)"]
-    end
-
-    subgraph Daemon["Antigravity Auto-Submit Daemon"]
-        Scanner["Bộ Quét Đa Mục Tiêu\n(Dual Target Scanner)"]
-        Injector["Bộ Tiêm Script & Xuyên Webview\n(Iframe Piercing Engine)"]
-        Observer["Giám Sát DOM & Tự Động Click\n(< 20ms Phản Hồi)"]
-    end
-
-    Desktop -->|DevToolsActivePort| Scanner
-    IDE -->|Port 9223 / DevToolsActivePort| Scanner
-    Scanner --> Injector
-    Injector -->|DOM Phẳng| Desktop
-    Injector -->|Xuyên Iframe / Webview| IDE
-    Observer -->|Tự Động Nhấn Submit / Allow| Desktop
-    Observer -->|Tự Động Nhấn Submit / Allow| IDE
+```text
+Phát hiện hộp thoại
+        ↓
+Trích xuất duy nhất một lệnh + working directory
+        ↓
+Policy engine phân loại rủi ro
+        ↓
+Chỉ mức LOW mới được xem xét tự duyệt
+        ↓
+Xác minh lại ID + hash + nội dung + trạng thái nút
+        ↓
+Click hoặc giữ nguyên để người dùng quyết định
 ```
 
----
+Nguyên tắc là **fail-closed**: khi thiếu thông tin, không phân tích chắc chắn được hoặc nội dung thay đổi trước lúc click, daemon sẽ không nhấn gì.
 
-## 📂 Danh Sách Tệp Trong Thư Mục
+### Lệnh có thể được tự duyệt
 
-| Tệp | Mô tả |
-| :--- | :--- |
-| **`auto_submit.js`** | Mã nguồn chính của daemon Node.js (hỗ trợ đa mục tiêu) |
-| **`setup_ide.bat`** | **[1-Click]** Kích hoạt cổng DevTools Protocol cho Antigravity IDE 2.0 |
-| **`setup_ide.js`** | Script cấu hình tự động cho `~/.antigravity-ide/argv.json` |
-| **`start_console.bat`** | Khởi động tool với cửa sổ Console (để theo dõi log trực tiếp) |
-| **`start_silent.vbs`** | **[Khuyên dùng]** Khởi chạy tool ẩn hoàn toàn dưới nền (không hiện cửa sổ nào) |
-| **`stop.bat`** | Dừng ngay lập tức dịch vụ auto-submit |
-| **`setup_autostart.bat`** | Thêm tool vào thư mục Startup của Windows (tự chạy khi bật máy) |
-| **`remove_autostart.bat`** | Hủy tự khởi động cùng Windows |
-| **`auto_submit_visual.py`** | Script Python dự phòng (clicker màn hình theo hình ảnh, cần cài OpenCV) |
+Allowlist được hardcode trong `command_policy.js` và chỉ gồm các dạng giới hạn:
 
----
+| Nhóm | Ví dụ |
+| --- | --- |
+| Vị trí hiện tại | `pwd`, `Get-Location` |
+| Trạng thái Git | `git status --short` |
+| Đọc lịch sử/diff Git | `git log --oneline -5`, `git diff --stat`, `git show HEAD` |
+| Liệt kê thư mục | `dir /b`, `Get-ChildItem -Force`, `ls` |
+| Tìm kiếm văn bản/tệp | `rg TODO src`, `rg --files` |
+| Kiểm tra cú pháp Node | `node --check file.js` |
 
-## 🛠️ Hướng Dẫn Thiết Lập Cho Antigravity IDE 2.0
+Ngay cả các lệnh trên cũng không được tự duyệt nếu chứa đường dẫn tuyệt đối, `..`, biến shell, tệp nhạy cảm hoặc cú pháp ghép lệnh.
 
-Khác với bản Desktop App vốn tự động mở cổng ngầm, Antigravity IDE (trên nền VS Code) cần mở cổng DevTools Protocol một lần duy nhất:
+### Trường hợp luôn yêu cầu duyệt thủ công
 
-1. **Nhấp đúp chuột vào tệp `setup_ide.bat`**.
-   - Script sẽ tự động thêm cờ `"remote-debugging-port": "9223"` vào tệp cấu hình runtime `~/.antigravity-ide/argv.json` một cách an toàn.
-2. **Khởi động lại Antigravity IDE**:
-   - Tắt Antigravity IDE và mở lại để IDE áp dụng cổng mới.
-3. Xong! Từ nay Auto-Submit Daemon sẽ tự động nhận diện cả Antigravity IDE mỗi khi IDE được bật.
+- Không đọc được chính xác một lệnh hoặc không có working directory tuyệt đối.
+- Pipe, redirect, `&&`, `||`, `;`, command substitution, biến môi trường hoặc cú pháp shell phức tạp.
+- Đường dẫn tuyệt đối, thư mục cha, `.env`, `.ssh`, credentials, token, password và các tệp bí mật khác.
+- Chạy script, test, build, package manager, network request hoặc chương trình ngoài allowlist.
+- Xóa/ghi đè dữ liệu, thay đổi Git có thể mất dữ liệu, quản lý process/service/user/registry/firewall, nâng quyền, shutdown, format ổ đĩa hoặc mã hóa/làm rối câu lệnh.
 
----
+Lệnh không được tự duyệt vẫn nằm nguyên trên giao diện để người dùng chọn `Allow` hoặc `Deny`. Daemon không tự nhấn `Deny`.
 
-## 🚀 Hướng Dẫn Sử Dụng Hàng Ngày
+> “Read-only” chỉ giảm rủi ro thay đổi máy, không đảm bảo dữ liệu đọc ra không nhạy cảm. Hãy kiểm tra thủ công khi làm việc với repository chứa bí mật hoặc dữ liệu production.
 
-### Cách 1: Chạy ẩn dưới nền (Khuyên dùng)
-- **Nhấp đúp chuột vào tệp `start_silent.vbs`**.
-- Chương trình sẽ chạy ngầm hoàn toàn. Khi bất kỳ cửa sổ Antigravity 2.0 hoặc Antigravity IDE 2.0 nào hiện bảng hỏi phê duyệt lệnh, tool sẽ âm thầm nhấn `Submit` / `Allow` ngay lập tức!
+## Kiến trúc
 
-### Cách 2: Chạy với cửa sổ Console (Để theo dõi log chi tiết)
-- **Nhấp đúp chuột vào tệp `start_console.bat`**.
-- Cửa sổ console sẽ hiện lên và hiển thị log trực tiếp:
-  ```text
-  [14:30:15] ✅ [Antigravity Desktop 2.0] Kết nối thành công (Port 59404)...
-  [14:30:16] ✅ [Antigravity IDE 2.0] Kết nối thành công (Port 9223)...
-  [14:35:10] ⚡ [Antigravity IDE 2.0] TỰ ĐỘNG PHÊ DUYỆT THÀNH CÔNG: Đã nhấn nút phê duyệt lệnh!
-  ```
+- `auto_submit.js`: kết nối CDP, điều phối quyết định và quản lý vòng đời daemon.
+- `dom_monitor.js`: phát hiện hộp thoại, trích xuất lệnh/CWD và xác minh lại trước click.
+- `command_policy.js`: policy engine thuần, không có quyền click.
+- `audit_logger.js`: audit log đã che dữ liệu nhạy cảm và xoay vòng.
+- `process_utils.js`: xác minh PID/command line để tránh chạy trùng hoặc dừng nhầm tiến trình.
+- `test/`: kiểm thử bằng `node:test`, không cần cài package.
 
-### Cách dừng chương trình:
-- **Nhấp đúp chuột vào tệp `stop.bat`** bất kỳ lúc nào bạn muốn tạm dừng tự động hóa.
+Chỉ có một vị trí gọi `.click()` trong toàn bộ mã nguồn: bên trong hàm xác minh của `dom_monitor.js`. Policy engine chạy ở Node.js; script trong trang không tự quyết định lệnh nào an toàn.
 
-### Cài đặt tự khởi động khi bật máy tính:
-- **Nhấp đúp chuột vào tệp `setup_autostart.bat`**.
-- Tool sẽ được đặt vào thư mục `shell:startup` của Windows. Mỗi khi bạn bật máy, tool sẽ tự động chạy ngầm phục vụ cả hai ứng dụng.
+## Thiết lập Antigravity IDE
 
----
+1. Nhấp đúp `setup_ide.bat` để thêm `"remote-debugging-port": "9223"` vào `~/.antigravity-ide/argv.json`.
+2. Tắt hoàn toàn và mở lại Antigravity IDE.
+3. Chạy daemon bằng một trong các cách bên dưới.
 
-## 🛡️ Cơ Chế An Toàn & Tránh Bấm Nhầm
-- Chương trình chỉ kích hoạt khi xác nhận có nút `Submit` / `Allow` nằm cạnh nút `Skip`/`Deny`/`Cancel` hoặc khi trang có chứa nội dung hộp thoại phê duyệt lệnh (`allow this time`, `Allow checking`, `tell the agent what to do instead`, `Do you want to run`, `requires your approval`).
-- Các nút chức năng khác trên giao diện (nút Settings, chọn model, gửi chat, chỉnh code trong editor) hoàn toàn không bị ảnh hưởng.
-- Có cơ chế **Cooldown (1.5 giây)** để tránh bị click đúp hoặc lặp lệnh liên tiếp.
+Antigravity Desktop được dò qua `DevToolsActivePort`. IDE ưu tiên `DevToolsActivePort` và dùng cổng `9223` làm fallback. Daemon chỉ chấp nhận WebSocket CDP từ loopback và đúng cổng đã phát hiện.
 
----
+## Sử dụng
 
-## ⚠️ Lưu Ý An Toàn & Bảo Mật (Security Disclaimer)
+### Chạy có console
 
-- **Bản chất hoạt động**: Hộp thoại xác nhận của Antigravity là lớp bảo vệ nhằm ngăn AI agent tự ý chạy các lệnh terminal ngoài ý muốn hoặc có thể làm thay đổi hệ thống. Công cụ này sẽ tự động nhấn `Submit` để bypass hộp thoại xác nhận đó.
-- **Khuyến nghị sử dụng**: Bạn chỉ nên bật công cụ này khi làm việc trên các dự án an toàn, môi trường phát triển (development/sandbox) đáng tin cậy hoặc khi bạn đã thiết lập kiểm soát phiên bản (Git).
-- **Kiểm soát thủ công**: Nếu đang thực hiện các thao tác nhạy cảm (như migration dữ liệu, xoá file hàng loạt, thao tác production), hãy nhấp đúp vào `stop.bat` để dừng công cụ và quay về cơ chế phê duyệt thủ công.
+Nhấp đúp `start_console.bat`. Console hiển thị lệnh nào được tự duyệt và lệnh nào đang chờ người dùng.
+
+### Chạy ẩn
+
+Nhấp đúp `start_silent.vbs`. Daemon chạy nền và vẫn ghi audit log.
+
+### Dừng
+
+Nhấp đúp `stop.bat`. Script xác minh PID cùng command line trước khi dừng và không quét/tắt các tiến trình Node khác.
+
+### Tự khởi động cùng Windows
+
+- `setup_autostart.bat`: tạo shortcut trong thư mục Startup.
+- `remove_autostart.bat`: gỡ shortcut đó.
+
+Daemon dùng PID lock để không chạy nhiều instance đồng thời.
+
+## Audit log
+
+Quyết định được ghi vào `security-audit.log` dưới dạng JSON Lines với các trường thời gian, ứng dụng, trang, mức rủi ro, hành động, rule, lý do và lệnh đã che bí mật.
+
+- Token, password, API key, credential trong URL và header authorization được thay bằng `[REDACTED]`.
+- Mỗi log tối đa khoảng 1 MB.
+- Giữ tối đa 5 bản sao xoay vòng: `.1` đến `.5`.
+- Các file `.log` đã nằm trong `.gitignore`.
+
+Audit log hỗ trợ điều tra nhưng không nên được xem là nơi lưu bí mật. Bộ che dữ liệu không thể nhận biết mọi định dạng bí mật tùy biến.
+
+## Kiểm thử
+
+Yêu cầu Node.js có `node:test` (khuyến nghị Node 20 trở lên):
+
+```powershell
+node --test
+```
+
+Bộ test kiểm tra allowlist, nhóm lệnh nguy hiểm, đường dẫn/tệp nhạy cảm, redaction, log rotation và việc hủy click khi hộp thoại thay đổi.
+
+## Phương án visual dự phòng
+
+`auto_submit_visual.py` đã được vô hiệu hóa vì nhận diện hình ảnh không thể cung cấp đủ command/CWD cho policy engine. Tệp được giữ lại chỉ để giải thích rõ cho các shortcut hoặc tài liệu cũ; nó không còn thực hiện click.
